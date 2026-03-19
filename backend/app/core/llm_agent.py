@@ -351,8 +351,7 @@ def run_agent(
     llm = ChatOpenAI(
         model=settings.LLM_MODEL,
         temperature=settings.LLM_TEMPERATURE,
-        api_key=settings.OPENAI_API_KEY,
-        streaming=True,
+        openai_api_key=settings.OPENAI_API_KEY,
     )
     llm_with_tools = llm.bind_tools(TOOLS_SCHEMA)
 

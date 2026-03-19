@@ -113,7 +113,7 @@ pytest tests/ -v
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 14 + TypeScript + Tailwind CSS |
+| Frontend | Next.js 15 + TypeScript + Tailwind CSS |
 | Backend | FastAPI + Python 3.11 |
 | LLM | LangChain + OpenAI GPT-4o |
 | Scheduler | Google OR-Tools CP-SAT |
