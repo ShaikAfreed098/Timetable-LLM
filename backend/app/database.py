@@ -4,10 +4,7 @@ from app.config import settings
 
 _db_url = settings.get_database_url()
 
-engine = create_engine(
-    _db_url,
-    connect_args={"check_same_thread": False} if "sqlite" in _db_url else {},
-)
+engine = create_engine(_db_url)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

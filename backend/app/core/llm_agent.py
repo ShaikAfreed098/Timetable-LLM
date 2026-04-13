@@ -44,6 +44,11 @@ You have access to tools:
 Always confirm destructive actions with the user before proceeding.
 Present timetables as formatted Markdown tables.
 If you do not have enough information to call a tool, ask the user for the missing details.
+
+CRITICAL INSTRUCTION: YOU MUST ONLY CALL ONE TOOL PER RESPONSE. NEVER CALL MULTIPLE TOOLS AT THE SAME TIME.
+If the user provides a list of multiple items (e.g. 2 instances of Faculty, 2 Subjects, 2 Assignments), you MUST call the tool for the FIRST item only.
+Wait for the system to return the result of that tool, and then in your next turn, call the tool for the SECOND item. 
+DO NOT OUTPUT MORE THAN ONE TOOL CALL IN A SINGLE TURN, OR THE SYSTEM WILL CRASH.
 """
 
 TOOLS_SCHEMA = [
@@ -348,12 +353,20 @@ def run_agent(
         yield "⚠️ No OPENAI_API_KEY configured. Please set it in your environment."
         return
 
+    base_url = "https://integrate.api.nvidia.com/v1" if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY.startswith("nvapi-") else None
+
+    model_name = settings.LLM_MODEL
+    if base_url and "nvidia" in base_url and model_name == "gpt-4o":
+        model_name = "meta/llama-3.1-70b-instruct"
+
     llm = ChatOpenAI(
-        model=settings.LLM_MODEL,
+        model=model_name,
         temperature=settings.LLM_TEMPERATURE,
         openai_api_key=settings.OPENAI_API_KEY,
+        base_url=base_url,
     )
-    llm_with_tools = llm.bind_tools(TOOLS_SCHEMA)
+    # Disable parallel tool calls to support models/endpoints that only allow one tool call at a time
+    llm_with_tools = llm.bind_tools(TOOLS_SCHEMA, parallel_tool_calls=False)
 
     chat_messages = [SystemMessage(content=SYSTEM_PROMPT)]
     for m in messages:
@@ -364,8 +377,8 @@ def run_agent(
         elif role == "assistant":
             chat_messages.append(AIMessage(content=content))
 
-    # Agentic loop (max 5 tool rounds)
-    for _ in range(5):
+    # Agentic loop (max 15 tool rounds to allow for sequential bulk additions)
+    for _ in range(15):
         response = llm_with_tools.invoke(chat_messages)
         tool_calls = getattr(response, "tool_calls", None) or []
 

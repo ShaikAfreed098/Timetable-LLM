@@ -1,13 +1,26 @@
 """
 Shared test fixtures for the Timetable LLM backend.
+Uses SQLite so tests run without a MySQL server.
 """
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+import os
+import sys
 
-from app.database import Base, get_db
-from app.main import app
+# ── Set env BEFORE any app module is imported ──────────────────────────────────
+# This must happen before pydantic-settings reads the .env file via Settings().
+os.environ["DATABASE_URL"] = "sqlite:///./test_timetable.db"
+
+# Force a fresh import of app modules so they use the patched env var
+for mod in list(sys.modules.keys()):
+    if mod.startswith("app"):
+        del sys.modules[mod]
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+
+from app.database import Base, get_db  # noqa: E402
+from app.main import app               # noqa: E402
 
 TEST_DATABASE_URL = "sqlite:///./test_timetable.db"
 

@@ -6,10 +6,12 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.database import Base
+from app.config import settings
 import app.models  # noqa: F401 – ensures all models are imported
 
 config = context.config
 fileConfig(config.config_file_name)
+config.set_main_option("sqlalchemy.url", settings.get_database_url().replace("%", "%%"))
 target_metadata = Base.metadata
 
 

@@ -52,7 +52,7 @@ export default function TimetableGrid({ timetableId }: TimetableGridProps) {
       const resp = await api.get(`/api/timetable/${id}`);
       const data: SlotData[] = resp.data;
       setSlots(data);
-      const ids = [...new Set(data.map((s) => s.batch_id))];
+      const ids = Array.from(new Set(data.map((s) => s.batch_id)));
       setBatchIds(ids);
       setSelectedBatch(ids[0] ?? null);
     } catch {

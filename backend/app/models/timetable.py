@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint, Uuid
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -26,7 +26,7 @@ class TimetableSlot(Base):
     __tablename__ = "timetable_slots"
 
     id = Column(Integer, primary_key=True, index=True)
-    timetable_id = Column(String, nullable=False, index=True)  # UUID grouping a full timetable run
+    timetable_id = Column(Uuid, nullable=False, index=True)  # UUID grouping a full timetable run
     batch_id = Column(Integer, ForeignKey("batches.id"), nullable=False)
     day_of_week = Column(String, nullable=False)      # "Monday" … "Friday"
     period_number = Column(Integer, nullable=False)   # 1–7 (teaching periods only)

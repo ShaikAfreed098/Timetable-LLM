@@ -47,10 +47,10 @@ class Settings(BaseSettings):
         if self.DB_HOST and self.DB_NAME and self.DB_USER:
             password = quote_plus(self.DB_PASSWORD or "")
             return (
-                f"postgresql://{self.DB_USER}:{password}"
+                f"postgresql+psycopg2://{self.DB_USER}:{password}"
                 f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
             )
-        return "sqlite:///./timetable.db"
+        raise ValueError("DATABASE_URL must be configured.")
 
     model_config = {"env_file": ".env"}
 

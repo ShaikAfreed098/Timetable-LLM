@@ -2,11 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import api from "@/lib/api";
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
+import { useChatStore, type Message } from "@/store/chat";
 
 interface ChatProps {
   onTimetableGenerated?: (timetableId: string) => void;
@@ -15,16 +11,16 @@ interface ChatProps {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function Chat({ onTimetableGenerated }: ChatProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Hello! I'm your Timetable AI assistant. I can help you manage faculty, subjects, rooms, batches, and generate conflict-free timetables.\n\nTry saying:\n- \"Add Dr. Ramesh Kumar from CSE department, max 5 periods per day\"\n- \"Generate timetable for CSE 3rd semester\"\n- \"Check conflicts for timetable [id]\"",
-    },
-  ]);
+  const {
+    messages,
+    sessionId,
+    addMessage,
+    updateLastMessage,
+    replaceLastMessageError,
+  } = useChatStore();
+
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sessionId] = useState(() => Math.random().toString(36).slice(2));
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,16 +31,14 @@ export default function Chat({ onTimetableGenerated }: ChatProps) {
     const text = input.trim();
     if (!text || loading) return;
 
-    const userMsg: Message = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+    addMessage({ role: "user", content: text });
     setInput("");
     setLoading(true);
 
-    const assistantMsg: Message = { role: "assistant", content: "" };
-    setMessages((prev) => [...prev, assistantMsg]);
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    addMessage({ role: "assistant", content: "" });
 
     try {
-      const history = messages.map((m) => ({ role: m.role, content: m.content }));
       // Use fetch for SSE streaming
       const raw = localStorage.getItem("timetable-auth");
       let token = "";
@@ -94,14 +88,7 @@ export default function Chat({ onTimetableGenerated }: ChatProps) {
             const parsed = JSON.parse(data);
             if (parsed.content) {
               fullContent += parsed.content;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: fullContent,
-                };
-                return updated;
-              });
+              updateLastMessage(fullContent);
 
               // Check if a timetable was generated
               const match = fullContent.match(
@@ -113,14 +100,7 @@ export default function Chat({ onTimetableGenerated }: ChatProps) {
             }
             if (parsed.error) {
               fullContent += `\n⚠️ Error: ${parsed.error}`;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: fullContent,
-                };
-                return updated;
-              });
+              updateLastMessage(fullContent);
             }
           } catch {
             // skip malformed JSON
@@ -130,14 +110,7 @@ export default function Chat({ onTimetableGenerated }: ChatProps) {
     } catch (err: unknown) {
       const errMsg =
         (err as Error)?.message ?? "An error occurred. Please try again.";
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: "assistant",
-          content: `⚠️ ${errMsg}`,
-        };
-        return updated;
-      });
+      replaceLastMessageError(errMsg);
     } finally {
       setLoading(false);
     }

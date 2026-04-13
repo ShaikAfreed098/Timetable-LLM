@@ -57,6 +57,7 @@ export default function LoginForm() {
 
       <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
         <button
+          suppressHydrationWarning
           onClick={() => setMode("login")}
           className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
             mode === "login" ? "bg-white shadow text-primary" : "text-gray-500"
@@ -65,6 +66,7 @@ export default function LoginForm() {
           Login
         </button>
         <button
+          suppressHydrationWarning
           onClick={() => setMode("register")}
           className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
             mode === "register" ? "bg-white shadow text-primary" : "text-gray-500"
@@ -80,6 +82,7 @@ export default function LoginForm() {
             Username
           </label>
           <input
+            suppressHydrationWarning
             type="text"
             required
             value={form.username}
@@ -95,6 +98,7 @@ export default function LoginForm() {
                 Email
               </label>
               <input
+                suppressHydrationWarning
                 type="email"
                 required
                 value={form.email}
@@ -124,6 +128,7 @@ export default function LoginForm() {
             Password
           </label>
           <input
+            suppressHydrationWarning
             type="password"
             required
             value={form.password}
@@ -139,6 +144,7 @@ export default function LoginForm() {
         )}
 
         <button
+          suppressHydrationWarning
           type="submit"
           disabled={loading}
           className="w-full bg-primary text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60"
