@@ -2,23 +2,22 @@ import axios from "axios";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const api = axios.create({ baseURL: API_URL });
-
-// Attach JWT token from localStorage automatically
-api.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    try {
-      const raw = localStorage.getItem("timetable-auth");
-      if (raw) {
-        const token = JSON.parse(raw)?.state?.token;
-        if (token) config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch {
-      // ignore parse errors
-    }
-  }
-  return config;
+const api = axios.create({ 
+  baseURL: API_URL,
+  withCredentials: true // Important for sending HttpOnly cookies
 });
+
+// Remove localStorage token logic since we rely on cookies now
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      // Handle unauthorized (e.g. redirect to login)
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
+);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -140,5 +139,19 @@ export const createAssignment = (data: {
 
 export const deleteAssignment = (id: number) =>
   api.delete(`/api/timetable/assignments/${id}`);
+
+// ─── Schedule Config ─────────────────────────────────────────────────────────
+
+export interface ScheduleConfig {
+  working_days: string[];
+  periods_per_day: number;
+  period_times: Record<string, string>;
+}
+
+export const fetchScheduleConfig = () =>
+  api.get<ScheduleConfig>("/api/config/schedule").then((r) => r.data);
+
+export const updateScheduleConfig = (data: ScheduleConfig) =>
+  api.post<ScheduleConfig>("/api/config/schedule", data).then((r) => r.data);
 
 export default api;

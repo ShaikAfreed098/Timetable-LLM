@@ -15,10 +15,21 @@ env/
 ENV/
 *.so
 
-# Environment
+# Environment — NEVER commit real secrets
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
+
+# Firebase service account — never commit
+firebase-credentials*.json
+service-account*.json
+
+# Backup files
+backups/
+*.sql.gz
+*.dump
 
 # Database
 *.db

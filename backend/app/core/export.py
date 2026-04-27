@@ -8,7 +8,7 @@ from typing import List
 
 from sqlalchemy.orm import Session
 
-from app.core.scheduler import DAYS, TEACHING_PERIODS, PERIOD_TIMES
+from app.core.scheduler import get_institution_config
 from app.models.timetable import TimetableSlot
 from app.models.batch import Batch
 
@@ -27,7 +27,7 @@ def _get_cell_label(slot: TimetableSlot, db: Session) -> str:
     return "\n".join(parts)
 
 
-def export_to_excel(db: Session, timetable_id: str) -> bytes:
+def export_to_excel(db: Session, timetable_id: str, institution_id: int) -> bytes:
     """Return Excel file as bytes."""
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill
@@ -35,7 +35,7 @@ def export_to_excel(db: Session, timetable_id: str) -> bytes:
 
     slots: List[TimetableSlot] = (
         db.query(TimetableSlot)
-        .filter(TimetableSlot.timetable_id == timetable_id)
+        .filter(TimetableSlot.timetable_id == timetable_id, TimetableSlot.institution_id == institution_id)
         .all()
     )
     if not slots:
@@ -48,6 +48,17 @@ def export_to_excel(db: Session, timetable_id: str) -> bytes:
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    config = get_institution_config(db, institution_id)
+    DAYS = config["days"]
+    TEACHING_PERIODS = config["periods"]
+    # We will get period_times from db in config if it exists
+    from app.models.config import ScheduleConfig
+    db_config = db.query(ScheduleConfig).filter(ScheduleConfig.institution_id == institution_id).first()
+    if db_config:
+        PERIOD_TIMES = db_config.period_times
+    else:
+        PERIOD_TIMES = {"1": "09:10-10:00", "2": "10:00-10:50", "3": "11:00-11:50", "4": "11:50-12:40", "5": "13:30-14:20", "6": "14:20-15:10", "7": "15:10-16:00"}
 
     for b_id in batch_ids:
         batch = db.get(Batch, b_id)
@@ -90,7 +101,7 @@ def export_to_excel(db: Session, timetable_id: str) -> bytes:
     return buf.getvalue()
 
 
-def export_to_pdf(db: Session, timetable_id: str) -> bytes:
+def export_to_pdf(db: Session, timetable_id: str, institution_id: int) -> bytes:
     """Return PDF file as bytes."""
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -106,7 +117,7 @@ def export_to_pdf(db: Session, timetable_id: str) -> bytes:
 
     slots: List[TimetableSlot] = (
         db.query(TimetableSlot)
-        .filter(TimetableSlot.timetable_id == timetable_id)
+        .filter(TimetableSlot.timetable_id == timetable_id, TimetableSlot.institution_id == institution_id)
         .all()
     )
     if not slots:
@@ -117,6 +128,16 @@ def export_to_pdf(db: Session, timetable_id: str) -> bytes:
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=1 * cm, bottomMargin=1 * cm)
     styles = getSampleStyleSheet()
     story = []
+
+    config = get_institution_config(db, institution_id)
+    DAYS = config["days"]
+    TEACHING_PERIODS = config["periods"]
+    from app.models.config import ScheduleConfig
+    db_config = db.query(ScheduleConfig).filter(ScheduleConfig.institution_id == institution_id).first()
+    if db_config:
+        PERIOD_TIMES = db_config.period_times
+    else:
+        PERIOD_TIMES = {"1": "09:10-10:00", "2": "10:00-10:50", "3": "11:00-11:50", "4": "11:50-12:40", "5": "13:30-14:20", "6": "14:20-15:10", "7": "15:10-16:00"}
 
     for b_id in batch_ids:
         batch = db.get(Batch, b_id)

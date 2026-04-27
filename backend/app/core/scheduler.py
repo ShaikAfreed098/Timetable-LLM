@@ -1,16 +1,8 @@
 """
 Conflict-free timetable generator using Google OR-Tools CP-SAT.
 
-College schedule:
-  P1  09:10–10:00
-  P2  10:00–10:50
-  Break 10:50–11:00  (skipped)
-  P3  11:00–11:50
-  P4  11:50–12:40
-  Lunch 12:40–13:30  (skipped)
-  P5  13:30–14:20
-  P6  14:20–15:10
-  P7  15:10–16:00
+Working days, periods, and period times are read per-institution from the
+ScheduleConfig table. No schedule constants are hardcoded here.
 """
 from __future__ import annotations
 
@@ -27,29 +19,34 @@ from app.models.subject import Subject
 from app.models.room import Room, RoomType
 from app.models.timetable import Assignment, TimetableSlot
 
-# --- College Configuration ---
-DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-TEACHING_PERIODS = [1, 2, 3, 4, 5, 6, 7]
+from app.models.config import ScheduleConfig
 
-PERIOD_TIMES = {
-    1: "09:10–10:00",
-    2: "10:00–10:50",
-    3: "11:00–11:50",
-    4: "11:50–12:40",
-    5: "13:30–14:20",
-    6: "14:20–15:10",
-    7: "15:10–16:00",
-}
+def get_institution_config(db: Session, institution_id: int):
+    config = db.query(ScheduleConfig).filter(ScheduleConfig.institution_id == institution_id).first()
+    if not config:
+        raise ValueError(
+            f"No ScheduleConfig found for institution_id={institution_id}. "
+            "Create one via /api/config before generating a timetable."
+        )
+    return {
+        "days": config.working_days,
+        "periods": list(range(1, config.periods_per_day + 1)),
+        "period_times": config.period_times or {},
+    }
 
 
-def generate_timetable(db: Session, semester: int, department: str) -> Dict[str, Any]:
+def generate_timetable(db: Session, semester: int, department: str, institution_id: int) -> Dict[str, Any]:
     """
     Generate a conflict-free timetable for all batches in the given
-    semester/department. Returns a dict with timetable_id and list of slot dicts.
+    semester/department for the specified institution. Returns a dict with timetable_id and list of slot dicts.
     """
+    config = get_institution_config(db, institution_id)
+    DAYS = config["days"]
+    TEACHING_PERIODS = config["periods"]
+
     batches: List[Batch] = (
         db.query(Batch)
-        .filter(Batch.semester == semester, Batch.department == department)
+        .filter(Batch.semester == semester, Batch.department == department, Batch.institution_id == institution_id)
         .all()
     )
     if not batches:
@@ -57,12 +54,12 @@ def generate_timetable(db: Session, semester: int, department: str) -> Dict[str,
 
     assignments: List[Assignment] = (
         db.query(Assignment)
-        .filter(Assignment.semester == semester)
+        .filter(Assignment.semester == semester, Assignment.institution_id == institution_id)
         .all()
     )
 
-    faculty_list: List[Faculty] = db.query(Faculty).filter(Faculty.is_active == True).all()
-    rooms: List[Room] = db.query(Room).all()
+    faculty_list: List[Faculty] = db.query(Faculty).filter(Faculty.is_active == True, Faculty.institution_id == institution_id).all()
+    rooms: List[Room] = db.query(Room).filter(Room.institution_id == institution_id).all()
 
     classrooms = [r for r in rooms if r.type != RoomType.lab]
     labs = [r for r in rooms if r.type == RoomType.lab]
@@ -226,8 +223,11 @@ def generate_timetable(db: Session, semester: int, department: str) -> Dict[str,
     timetable_id = str(uuid.uuid4())
     result_slots = []
 
-    # Delete previous slots for these batches
-    db.query(TimetableSlot).filter(TimetableSlot.batch_id.in_(batch_ids)).delete(synchronize_session=False)
+    # Delete previous slots for these batches (institution-scoped for defense-in-depth)
+    db.query(TimetableSlot).filter(
+        TimetableSlot.batch_id.in_(batch_ids),
+        TimetableSlot.institution_id == institution_id,
+    ).delete(synchronize_session=False)
 
     for b_id in batch_ids:
         for d_idx, day_name in enumerate(DAYS):
@@ -236,6 +236,7 @@ def generate_timetable(db: Session, semester: int, department: str) -> Dict[str,
                 if val == SENTINEL:
                     slot = TimetableSlot(
                         timetable_id=timetable_id,
+                        institution_id=institution_id,
                         batch_id=b_id,
                         day_of_week=day_name,
                         period_number=period_num,
@@ -246,6 +247,7 @@ def generate_timetable(db: Session, semester: int, department: str) -> Dict[str,
                     chosen_room_id = lab_ids[0] if s["requires_lab"] else classroom_ids[0]
                     slot = TimetableSlot(
                         timetable_id=timetable_id,
+                        institution_id=institution_id,
                         batch_id=b_id,
                         day_of_week=day_name,
                         period_number=period_num,
@@ -266,10 +268,11 @@ def generate_timetable(db: Session, semester: int, department: str) -> Dict[str,
     }
 
 
-def check_conflicts(db: Session, timetable_id: str) -> List[str]:
+def check_conflicts(db: Session, timetable_id: str, institution_id: int) -> List[str]:
     """Return a list of conflict descriptions for a given timetable."""
     slots: List[TimetableSlot] = db.query(TimetableSlot).filter(
-        TimetableSlot.timetable_id == timetable_id
+        TimetableSlot.timetable_id == timetable_id,
+        TimetableSlot.institution_id == institution_id
     ).all()
     conflicts = []
 

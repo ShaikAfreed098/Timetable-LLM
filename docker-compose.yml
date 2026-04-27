@@ -10,7 +10,7 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=mysql+pymysql://admin:${DB_PASSWORD:-changeme}@db:3306/timetable_db
+      - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-changeme}@db:5432/timetable_db
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
@@ -34,18 +34,17 @@ services:
     restart: unless-stopped
 
   db:
-    image: mysql:8.0
+    image: postgres:16
     environment:
-      MYSQL_DATABASE: timetable_db
-      MYSQL_USER: admin
-      MYSQL_PASSWORD: ${DB_PASSWORD:-changeme}
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootchangeme}
+      POSTGRES_DB: timetable_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "admin", "--password=${DB_PASSWORD:-changeme}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d timetable_db"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -58,6 +57,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  mysql_data:
+  postgres_data:
   redis_data:
   backend_data:

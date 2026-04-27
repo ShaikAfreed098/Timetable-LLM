@@ -1,124 +1,85 @@
 # Timetable LLM
 
-An **LLM-powered College Timetable Automation System** that replaces manual scheduling with an intelligent, constraint-aware AI system.
+Multi-tenant SaaS for automated college/school/coaching-center timetable
+generation. Natural-language chat interface + constraint solver + configurable
+schedule per institution.
 
 ## Features
 
-- 🤖 **AI Chat Interface** — Natural-language commands to manage faculty, subjects, rooms, and batches
-- ⚙️ **Constraint Solver** — Google OR-Tools CP-SAT for conflict-free timetable generation
-- 📅 **Timetable Grid** — Interactive display with per-batch views
-- 📤 **Export** — Download timetables as PDF or Excel
-- 🔒 **JWT Authentication** — Role-based access control (Super Admin, Department Admin, Faculty)
-- 🐳 **Docker** — Full containerised deployment
+- AI chat interface backed by LangChain tool-calling
+- OR-Tools CP-SAT constraint solver for conflict-free scheduling
+- Per-institution `ScheduleConfig` (working days, periods, period times)
+- Firebase Google sign-in + JWT session cookies
+- Invite-based user onboarding
+- PDF / Excel export
+- Audit logging
+- Celery + Redis for async tasks
+- Docker Compose for dev and prod
 
-## College Schedule (Pre-configured)
-
-| Period | Time | Type |
-|--------|------|------|
-| P1 | 09:10–10:00 | Teaching |
-| P2 | 10:00–10:50 | Teaching |
-| Break | 10:50–11:00 | Short Break |
-| P3 | 11:00–11:50 | Teaching |
-| P4 | 11:50–12:40 | Teaching |
-| Lunch | 12:40–13:30 | Lunch Break |
-| P5 | 13:30–14:20 | Teaching |
-| P6 | 14:20–15:10 | Teaching |
-| P7 | 15:10–16:00 | Teaching |
-
-## Quick Start
-
-### With Docker Compose (Recommended)
+## Quick Start (Docker)
 
 ```bash
-cp .env.example .env
-# Edit .env and set OPENAI_API_KEY and JWT_SECRET
+cp .env.example .env          # fill in real values — see below
 docker compose up --build
 ```
 
-Frontend: http://localhost:3000  
-Backend API: http://localhost:8000  
-API Docs: http://localhost:8000/api/docs
+- Frontend: http://localhost:3000
+- Backend:  http://localhost:8000
+- API docs: http://localhost:8000/api/docs (disabled in production)
 
-### Local Development
+## Local Development
 
-**Backend:**
+Backend:
+
 ```bash
 cd backend
+python -m venv .venv && source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
-cp ../.env.example .env  # edit as needed
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-**Frontend:**
+Frontend:
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-## Architecture
-
-```
-[ React/Next.js Chat UI ] → [ FastAPI Backend ]
-                                    ├── LangChain LLM Agent (OpenAI)
-                                    │     └── Tool calling → DB operations
-                                    ├── OR-Tools Constraint Solver
-                                    │     └── Conflict-free scheduling
-                                    ├── PostgreSQL (data store)
-                                    └── Export (PDF / Excel)
-```
-
-## API Reference
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | Register a new user |
-| POST | `/api/auth/token` | Login (get JWT) |
-| GET | `/api/faculty` | List faculty |
-| POST | `/api/faculty` | Add faculty |
-| GET | `/api/subjects` | List subjects |
-| POST | `/api/subjects` | Add subject |
-| GET | `/api/rooms` | List rooms |
-| POST | `/api/rooms` | Add room |
-| GET | `/api/batches` | List batches |
-| POST | `/api/batches` | Add batch |
-| POST | `/api/timetable/generate` | Generate timetable |
-| GET | `/api/timetable/{id}` | Get timetable slots |
-| GET | `/api/timetable/{id}/conflicts` | Check conflicts |
-| POST | `/api/timetable/{id}/export` | Export PDF/Excel |
-| POST | `/api/chat` | LLM chat (SSE stream) |
-
-Full interactive docs at `/api/docs` (Swagger UI).
-
-## Running Tests
+## Tests
 
 ```bash
 cd backend
-pip install -r requirements.txt
-pytest tests/ -v
+pytest -v
 ```
 
-## Environment Variables
+## Required Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key (required for chat) |
-| `DATABASE_URL` | SQLAlchemy DB URL (default: SQLite) |
-| `REDIS_URL` | Redis connection string |
-| `JWT_SECRET` | Secret for JWT signing |
-| `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) |
-| `LLM_MODEL` | LLM model name (default: `gpt-4o`) |
+All secrets must come from the environment. See `.env.example`.
 
-## Technology Stack
+| Variable | Purpose |
+|----------|---------|
+| `ENVIRONMENT` | `development` \| `staging` \| `production` |
+| `DEBUG` | `False` in production |
+| `JWT_SECRET` | ≥32-char random string (`openssl rand -hex 32`) |
+| `DATABASE_URL` or `DB_*` | Postgres connection |
+| `DB_SSL_MODE` | `require` in production |
+| `REDIS_URL` | Redis connection |
+| `LLM_PROVIDER` | `openai` \| `nvidia` \| `anthropic` |
+| `LLM_API_KEY` | LLM provider API key |
+| `LLM_BASE_URL` | Override base URL (optional) |
+| `LLM_MODEL` | Model identifier |
+| `FIREBASE_PROJECT_ID` | Firebase project ID |
+| `ALLOWED_ORIGINS` | Comma-separated CORS whitelist |
+| `RATE_LIMIT_PER_MINUTE` | Default rate limit |
+| `SMTP_*` | For invite emails |
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 15 + TypeScript + Tailwind CSS |
-| Backend | FastAPI + Python 3.11 |
-| LLM | LangChain + OpenAI GPT-4o |
-| Scheduler | Google OR-Tools CP-SAT |
-| Database | PostgreSQL 15 / SQLite (dev) |
-| Cache | Redis 7 |
-| Export | ReportLab (PDF) + openpyxl (Excel) |
-| Auth | JWT (python-jose + passlib/bcrypt) |
-| Container | Docker + Docker Compose |
+In production (`ENVIRONMENT=production`), the app refuses to start if
+`JWT_SECRET` is weak, `LLM_API_KEY` is missing, `DEBUG` is on, or
+`ALLOWED_ORIGINS` contains `*`.
+
+## Further Docs
+
+- [DEPLOYMENT.md](DEPLOYMENT.md) — deploy to a VPS
+- [docs/RUNBOOK.md](docs/RUNBOOK.md) — operate in production

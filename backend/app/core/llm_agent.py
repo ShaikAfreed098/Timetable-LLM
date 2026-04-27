@@ -3,9 +3,8 @@ LLM Agent powered by LangChain + OpenAI with tool/function calling.
 """
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_openai import ChatOpenAI
@@ -13,42 +12,37 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.scheduler import generate_timetable, check_conflicts
-from app.models.faculty import Faculty
 from app.models.subject import Subject
-from app.models.room import Room, RoomType
+from app.models.room import Room
 from app.models.batch import Batch
 from app.models.timetable import Assignment
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an intelligent college timetable assistant.
+def get_system_prompt(config: dict) -> str:
+    days_str = ", ".join(config["days"])
+    periods_str = ", ".join(str(p) for p in config["periods"])
+    period_times = config.get("period_times") or {}
+    times_block = ""
+    if period_times:
+        lines = [f"  P{k}: {v}" for k, v in sorted(period_times.items(), key=lambda kv: int(kv[0]))]
+        times_block = "\nPeriod times:\n" + "\n".join(lines)
+    return f"""You are an intelligent timetable assistant for an educational institution.
 
-College hours: 9:10 AM to 4:00 PM. Each teaching period is 50 minutes.
-Morning break: 10:50 AM – 11:00 AM (non-negotiable, not a teaching period).
-Lunch break: 12:40 PM – 1:30 PM (non-negotiable, not a teaching period).
-Period schedule:
-  P1 09:10–10:00 | P2 10:00–10:50 | [Break] |
-  P3 11:00–11:50 | P4 11:50–12:40 | [Lunch] |
-  P5 13:30–14:20 | P6 14:20–15:10 | P7 15:10–16:00
+The institution operates on the following days: {days_str}.
+They have {len(config["periods"])} periods per day: {periods_str}.{times_block}
 
-You have access to tools:
-  - add_faculty: add a faculty member
-  - add_subject: add a subject
-  - add_room: add a room
-  - add_batch: add a student batch/section
-  - assign_subject: assign a subject to a faculty for a batch
-  - generate_timetable: generate a conflict-free timetable
-  - check_conflicts: check a timetable for conflicts
-  - get_faculty_schedule: retrieve a faculty member's schedule
+Available tools:
+  - add_faculty, add_subject, add_room, add_batch
+  - assign_subject
+  - generate_timetable, check_conflicts, get_faculty_schedule
 
-Always confirm destructive actions with the user before proceeding.
-Present timetables as formatted Markdown tables.
-If you do not have enough information to call a tool, ask the user for the missing details.
-
-CRITICAL INSTRUCTION: YOU MUST ONLY CALL ONE TOOL PER RESPONSE. NEVER CALL MULTIPLE TOOLS AT THE SAME TIME.
-If the user provides a list of multiple items (e.g. 2 instances of Faculty, 2 Subjects, 2 Assignments), you MUST call the tool for the FIRST item only.
-Wait for the system to return the result of that tool, and then in your next turn, call the tool for the SECOND item. 
-DO NOT OUTPUT MORE THAN ONE TOOL CALL IN A SINGLE TURN, OR THE SYSTEM WILL CRASH.
+Guidelines:
+- Confirm destructive actions before proceeding.
+- Present timetables as formatted Markdown tables.
+- If you lack information to call a tool, ask the user for the missing details.
+- Call tools one at a time when adding multiple items sequentially (this endpoint
+  is configured with parallel_tool_calls=False for provider compatibility).
 """
 
 TOOLS_SCHEMA = [
@@ -198,16 +192,17 @@ TOOLS_SCHEMA = [
 ]
 
 
-def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
+def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session, institution_id: int) -> str:
     """Execute a tool call and return a string result."""
     try:
         if tool_name == "add_faculty":
             from app.models.faculty import Faculty as FacultyModel
 
-            existing = db.query(FacultyModel).filter(FacultyModel.email == args["email"]).first()
+            existing = db.query(FacultyModel).filter(FacultyModel.email == args["email"], FacultyModel.institution_id == institution_id).first()
             if existing:
                 return f"Faculty with email {args['email']} already exists (id={existing.id})."
             f = FacultyModel(
+                institution_id=institution_id,
                 name=args["name"],
                 department=args["department"],
                 email=args["email"],
@@ -222,10 +217,11 @@ def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
         elif tool_name == "add_subject":
             from app.models.subject import Subject as SubjectModel
 
-            existing = db.query(SubjectModel).filter(SubjectModel.code == args["code"]).first()
+            existing = db.query(SubjectModel).filter(SubjectModel.code == args["code"], SubjectModel.institution_id == institution_id).first()
             if existing:
                 return f"Subject with code {args['code']} already exists (id={existing.id})."
             s = SubjectModel(
+                institution_id=institution_id,
                 name=args["name"],
                 code=args["code"],
                 department=args["department"],
@@ -241,10 +237,11 @@ def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
         elif tool_name == "add_room":
             from app.models.room import Room as RoomModel
 
-            existing = db.query(RoomModel).filter(RoomModel.room_number == args["room_number"]).first()
+            existing = db.query(RoomModel).filter(RoomModel.room_number == args["room_number"], RoomModel.institution_id == institution_id).first()
             if existing:
                 return f"Room {args['room_number']} already exists (id={existing.id})."
             r = RoomModel(
+                institution_id=institution_id,
                 room_number=args["room_number"],
                 capacity=args.get("capacity", 60),
                 type=args.get("type", "classroom"),
@@ -258,6 +255,7 @@ def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
 
         elif tool_name == "add_batch":
             b = Batch(
+                institution_id=institution_id,
                 name=args["name"],
                 department=args["department"],
                 semester=args["semester"],
@@ -276,12 +274,14 @@ def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
                     Assignment.faculty_id == args["faculty_id"],
                     Assignment.subject_id == args["subject_id"],
                     Assignment.batch_id == args["batch_id"],
+                    Assignment.institution_id == institution_id,
                 )
                 .first()
             )
             if existing:
                 return "Assignment already exists."
             a = Assignment(
+                institution_id=institution_id,
                 faculty_id=args["faculty_id"],
                 subject_id=args["subject_id"],
                 batch_id=args["batch_id"],
@@ -292,7 +292,7 @@ def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
             return "Subject assigned successfully."
 
         elif tool_name == "generate_timetable":
-            result = generate_timetable(db, args["semester"], args["department"])
+            result = generate_timetable(db, args["semester"], args["department"], institution_id)
             if result.get("conflicts"):
                 return "Timetable generation failed: " + "; ".join(result["conflicts"])
             return (
@@ -302,7 +302,7 @@ def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
             )
 
         elif tool_name == "check_conflicts":
-            conflicts = check_conflicts(db, args["timetable_id"])
+            conflicts = check_conflicts(db, args["timetable_id"], institution_id)
             if not conflicts:
                 return "No conflicts detected. The timetable is conflict-free."
             return "Conflicts found:\n" + "\n".join(f"- {c}" for c in conflicts)
@@ -316,6 +316,7 @@ def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
                     TimetableSlot.timetable_id == args["timetable_id"],
                     TimetableSlot.faculty_id == args["faculty_id"],
                     TimetableSlot.slot_type == "class",
+                    TimetableSlot.institution_id == institution_id,
                 )
                 .order_by(TimetableSlot.day_of_week, TimetableSlot.period_number)
                 .all()
@@ -343,32 +344,36 @@ def _execute_tool(tool_name: str, args: Dict[str, Any], db: Session) -> str:
 def run_agent(
     messages: List[Dict[str, str]],
     db: Session,
-    stream: bool = False,
+    institution_id: int,
 ) -> Generator[str, None, None]:
     """
     Run the LLM agent with tool calling.
     Yields text chunks (for streaming) or a single final response.
     """
-    if not settings.OPENAI_API_KEY or not settings.OPENAI_API_KEY.strip():
-        yield "⚠️ No OPENAI_API_KEY configured. Please set it in your environment."
+    api_key = settings.resolved_llm_api_key()
+    if not api_key or not api_key.strip():
+        yield "LLM is not configured. Set LLM_API_KEY in the server environment."
         return
 
-    base_url = "https://integrate.api.nvidia.com/v1" if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY.startswith("nvapi-") else None
-
+    base_url = settings.resolved_llm_base_url()
     model_name = settings.LLM_MODEL
-    if base_url and "nvidia" in base_url and model_name == "gpt-4o":
+    if settings.LLM_PROVIDER == "nvidia" and model_name == "gpt-4o":
         model_name = "meta/llama-3.1-70b-instruct"
 
     llm = ChatOpenAI(
         model=model_name,
         temperature=settings.LLM_TEMPERATURE,
-        openai_api_key=settings.OPENAI_API_KEY,
+        openai_api_key=api_key,
         base_url=base_url,
     )
     # Disable parallel tool calls to support models/endpoints that only allow one tool call at a time
     llm_with_tools = llm.bind_tools(TOOLS_SCHEMA, parallel_tool_calls=False)
 
-    chat_messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    from app.core.scheduler import get_institution_config
+    config = get_institution_config(db, institution_id)
+    dynamic_prompt = get_system_prompt(config)
+
+    chat_messages = [SystemMessage(content=dynamic_prompt)]
     for m in messages:
         role = m.get("role", "user")
         content = m.get("content", "")
@@ -392,7 +397,7 @@ def run_agent(
         for tc in tool_calls:
             tool_name = tc["name"]
             tool_args = tc["args"]
-            tool_result = _execute_tool(tool_name, tool_args, db)
+            tool_result = _execute_tool(tool_name, tool_args, db, institution_id)
             from langchain_core.messages import ToolMessage
             chat_messages.append(
                 ToolMessage(content=tool_result, tool_call_id=tc["id"])

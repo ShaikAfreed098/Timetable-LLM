@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List
-import io
 
 from app.database import get_db
 from app.models.timetable import TimetableSlot, Assignment
-from app.models.batch import Batch
+from app.models.user import User
 from app.schemas.timetable import AssignmentCreate, AssignmentOut, TimetableSlotOut
 from app.core.auth import get_current_user
 from app.core.scheduler import generate_timetable as _generate, check_conflicts as _check
@@ -19,7 +18,7 @@ router = APIRouter(prefix="/api/timetable", tags=["timetable"])
 def create_assignment(
     assignment_in: AssignmentCreate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     existing = (
         db.query(Assignment)
@@ -27,12 +26,13 @@ def create_assignment(
             Assignment.faculty_id == assignment_in.faculty_id,
             Assignment.subject_id == assignment_in.subject_id,
             Assignment.batch_id == assignment_in.batch_id,
+            Assignment.institution_id == current_user.institution_id,
         )
         .first()
     )
     if existing:
         raise HTTPException(status_code=400, detail="Assignment already exists.")
-    a = Assignment(**assignment_in.model_dump())
+    a = Assignment(**assignment_in.model_dump(), institution_id=current_user.institution_id)
     db.add(a)
     db.commit()
     db.refresh(a)
@@ -40,8 +40,8 @@ def create_assignment(
 
 
 @router.get("/assignments", response_model=List[AssignmentOut])
-def list_assignments(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    return db.query(Assignment).all()
+def list_assignments(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Assignment).filter(Assignment.institution_id == current_user.institution_id).all()
 
 
 @router.post("/generate")
@@ -49,9 +49,12 @@ def generate(
     semester: int,
     department: str,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    result = _generate(db, semester, department)
+    try:
+        result = _generate(db, semester, department, current_user.institution_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=[str(e)])
     if result.get("conflicts") and not result.get("timetable_id"):
         raise HTTPException(status_code=422, detail=result["conflicts"])
     return result
@@ -61,11 +64,11 @@ def generate(
 def get_timetable(
     timetable_id: str,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     slots = (
         db.query(TimetableSlot)
-        .filter(TimetableSlot.timetable_id == timetable_id)
+        .filter(TimetableSlot.timetable_id == timetable_id, TimetableSlot.institution_id == current_user.institution_id)
         .all()
     )
     if not slots:
@@ -80,13 +83,14 @@ def modify_slot(
     new_faculty_id: int | None = None,
     new_room_id: int | None = None,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     slot = (
         db.query(TimetableSlot)
         .filter(
             TimetableSlot.timetable_id == timetable_id,
             TimetableSlot.id == slot_id,
+            TimetableSlot.institution_id == current_user.institution_id,
         )
         .first()
     )
@@ -104,9 +108,9 @@ def modify_slot(
 def get_conflicts(
     timetable_id: str,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    conflicts = _check(db, timetable_id)
+    conflicts = _check(db, timetable_id, current_user.institution_id)
     return {"timetable_id": timetable_id, "conflicts": conflicts}
 
 
@@ -115,17 +119,17 @@ def export_timetable(
     timetable_id: str,
     format: str = "pdf",
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     if format == "excel":
-        data = export_to_excel(db, timetable_id)
+        data = export_to_excel(db, timetable_id, current_user.institution_id)
         return Response(
             content=data,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment; filename=timetable_{timetable_id}.xlsx"},
         )
     else:
-        data = export_to_pdf(db, timetable_id)
+        data = export_to_pdf(db, timetable_id, current_user.institution_id)
         return Response(
             content=data,
             media_type="application/pdf",

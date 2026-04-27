@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(taskkill /F /IM node.exe /T)",
+      "Bash(taskkill /F /IM python.exe /T)",
+      "Bash(taskkill /F /IM uvicorn.exe /T)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/test_tenant_isolation.py::test_list_endpoints_are_tenant_scoped -v)",
+      "Bash(python -m pytest tests/test_tenant_isolation.py -v)"
+    ]
+  }
+}

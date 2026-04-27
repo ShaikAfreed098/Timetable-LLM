@@ -12,9 +12,10 @@ import {
   fetchRooms, createRoom, deleteRoom,
   fetchBatches, createBatch, deleteBatch,
   fetchAssignments, createAssignment, deleteAssignment,
+  ScheduleConfig, fetchScheduleConfig, updateScheduleConfig
 } from "@/lib/api";
 
-type Section = "chat" | "timetable" | "faculty" | "subjects" | "rooms" | "batches" | "assignments";
+type Section = "chat" | "timetable" | "faculty" | "subjects" | "rooms" | "batches" | "assignments" | "settings";
 
 const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "chat",        label: "AI Chat",     icon: "💬" },
@@ -24,6 +25,7 @@ const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "rooms",      label: "Rooms",       icon: "🏫" },
   { id: "batches",    label: "Batches",     icon: "👥" },
   { id: "assignments",label: "Assignments", icon: "🔗" },
+  { id: "settings",   label: "Settings",    icon: "⚙️" },
 ];
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
@@ -578,15 +580,161 @@ function AssignmentsSection() {
   );
 }
 
+// ─── Settings Section ─────────────────────────────────────────────────────────
+
+function SettingsSection() {
+  const [config, setConfig] = useState<ScheduleConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const ALL_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setConfig(await fetchScheduleConfig()); } catch { setError("Failed to load config."); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!config) return;
+    setSaving(true); setError(""); setSuccess("");
+    try {
+      await updateScheduleConfig(config);
+      setSuccess("Schedule configuration saved successfully.");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch {
+      setError("Failed to save schedule configuration.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleDay = (day: string) => {
+    if (!config) return;
+    const newDays = config.working_days.includes(day)
+      ? config.working_days.filter(d => d !== day)
+      : [...config.working_days, day];
+    
+    // Sort based on ALL_DAYS order
+    newDays.sort((a, b) => ALL_DAYS.indexOf(a) - ALL_DAYS.indexOf(b));
+    setConfig({ ...config, working_days: newDays });
+  };
+
+  const updatePeriodTime = (period: number, time: string) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      period_times: { ...config.period_times, [String(period)]: time }
+    });
+  };
+
+  const handlePeriodsChange = (newCount: number) => {
+    if (!config || newCount < 1 || newCount > 15) return;
+    const newTimes = { ...config.period_times };
+    // Add default times for new periods if any
+    for (let i = 1; i <= newCount; i++) {
+      if (!newTimes[String(i)]) newTimes[String(i)] = "00:00-00:00";
+    }
+    setConfig({ ...config, periods_per_day: newCount, period_times: newTimes });
+  };
+
+  if (loading) return <Spinner />;
+  if (!config) return <div className="p-6">Error loading config.</div>;
+
+  return (
+    <div className="p-6 max-w-3xl mx-auto">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-800">Institution Settings</h1>
+        <p className="text-gray-500">Configure your operating days and timetable periods.</p>
+      </div>
+
+      {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
+      {success && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm">{success}</div>}
+
+      <form onSubmit={handleSave} className="space-y-6">
+        <div className="bg-white p-6 rounded-xl shadow">
+          <h2 className="text-lg font-semibold mb-4 border-b pb-2">Working Days</h2>
+          <div className="flex flex-wrap gap-3">
+            {ALL_DAYS.map(day => {
+              const active = config.working_days.includes(day);
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => toggleDay(day)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    active ? "bg-primary text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow">
+          <h2 className="text-lg font-semibold mb-4 border-b pb-2">Periods Configuration</h2>
+          <div className="mb-6 max-w-xs">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Number of Periods per Day</label>
+            <input 
+              type="number" min={1} max={15}
+              value={config.periods_per_day}
+              onChange={e => handlePeriodsChange(Number(e.target.value))}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-3">Period Timings</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {Array.from({ length: config.periods_per_day }).map((_, i) => {
+                const p = i + 1;
+                return (
+                  <div key={p} className="flex items-center gap-3 bg-gray-50 p-2 rounded border">
+                    <span className="w-8 h-8 flex items-center justify-center bg-gray-200 rounded text-xs font-bold text-gray-600 shrink-0">
+                      P{p}
+                    </span>
+                    <input
+                      type="text"
+                      value={config.period_times[String(p)] || ""}
+                      onChange={e => updatePeriodTime(p, e.target.value)}
+                      placeholder="e.g. 09:00-10:00"
+                      className="flex-1 bg-white border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                      required
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button type="submit" disabled={saving || config.working_days.length === 0}
+            className="px-6 py-2.5 bg-primary text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60">
+            {saving ? "Saving..." : "Save Settings"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // ─── Main App Layout ──────────────────────────────────────────────────────────
 
 export default function HomePage() {
-  const { token, username, role, logout } = useAuthStore();
+  const { username, role, logout } = useAuthStore();
   const [section, setSection] = useState<Section>("chat");
   const [timetableId, setTimetableId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  if (!token) {
+  if (!username) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
         <LoginForm />
@@ -603,6 +751,7 @@ export default function HomePage() {
       case "rooms":      return <RoomsSection />;
       case "batches":    return <BatchesSection />;
       case "assignments":return <AssignmentsSection />;
+      case "settings":   return <SettingsSection />;
     }
   };
 
