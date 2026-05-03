@@ -11,7 +11,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.database import get_db
-from app.core.auth import get_current_user
+from app.core.auth import require_role
 from app.core.llm_agent import run_agent
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -35,7 +35,7 @@ def chat(
     request: Request,
     req: ChatRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user = Depends(require_role("super_admin", "department_admin")),
 ):
     """
     Chat endpoint. Streams the LLM response as Server-Sent Events.
@@ -45,7 +45,7 @@ def chat(
 
     def event_stream():
         try:
-            for chunk in run_agent(messages, db, current_user.institution_id, stream=True):
+            for chunk in run_agent(messages, db, current_user.institution_id):
                 data = json.dumps({"content": chunk})
                 yield f"data: {data}\n\n"
             yield "data: [DONE]\n\n"

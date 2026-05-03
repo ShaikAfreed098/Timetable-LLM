@@ -44,7 +44,7 @@ export default function InvitePage() {
     try {
       const provider = new GoogleAuthProvider();
       // Ensure the user signs in with the invited email
-      provider.setCustomParameters({ login_hint: invite?.email });
+      provider.setCustomParameters({ login_hint: invite?.email || "" });
       const userCred = await signInWithPopup(auth, provider);
       const idToken = await userCred.user.getIdToken();
       

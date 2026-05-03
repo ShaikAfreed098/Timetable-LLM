@@ -10,7 +10,6 @@ from app.models.room import Room
 from app.models.batch import Batch
 from app.models.timetable import Assignment, TimetableSlot
 from app.models.institution import Institution
-from app.models.config import ScheduleConfig
 from app.core.scheduler import generate_timetable, check_conflicts, get_institution_config
 
 
@@ -136,3 +135,98 @@ def test_faculty_unavailable_slot_respected(db, scheduler_data):
         .all()
     )
     assert len(monday_p1_slots) == 0, "Faculty should not be scheduled during unavailable slot"
+
+
+def test_capacity_mismatch_aborts(db, scheduler_data):
+    """If no room is big enough for a batch, generation should abort."""
+    inst = scheduler_data["institution"]
+    # Create a NEW batch that is too big for our 60-seat room
+    # Use a completely unique department to avoid picking up other batches
+    b_huge = Batch(name="HUGE-BATCH", department="HUGE-DEPT", semester=1,
+                   student_count=100, year=2024, institution_id=inst.id)
+    db.add(b_huge)
+    # Subject that requires classroom
+    s_huge = Subject(name="Huge Subject", code="HUGE101", department="HUGE-DEPT",
+                     credits=3, periods_per_week=1, institution_id=inst.id)
+    db.add(s_huge)
+    db.flush()
+    # Assignment for huge batch
+    a_huge = Assignment(faculty_id=scheduler_data["faculty"][0].id, 
+                        subject_id=s_huge.id, 
+                        batch_id=b_huge.id,
+                        semester=1, institution_id=inst.id)
+    db.add(a_huge)
+    db.commit()
+
+    result = generate_timetable(db, semester=1, department="HUGE-DEPT", institution_id=inst.id)
+    assert result["timetable_id"] is None
+    assert any("Batch 'HUGE-BATCH'" in c for c in result["conflicts"])
+    assert any("no suitable classroom" in c for c in result["conflicts"])
+    # In the seeded data, we have one 60-seat room. 
+    # Let's verify that's the max_cap reported.
+    assert any("largest available capacity is 60" in c for c in result["conflicts"])
+
+
+def test_capacity_picks_eligible_room(db, scheduler_data):
+    """A batch should be assigned to an eligible room (capacity >= students)."""
+    inst = scheduler_data["institution"]
+    # Use a new department to isolate
+    b_pick = Batch(name="PICK-BATCH", department="PICK-DEPT", semester=1,
+                   student_count=70, year=2024, institution_id=inst.id)
+    db.add(b_pick)
+    # Add a small room and a big room
+    r_small = Room(room_number="SMALL", capacity=30, type="classroom", institution_id=inst.id)
+    r_big = Room(room_number="BIG", capacity=80, type="classroom", institution_id=inst.id)
+    db.add_all([r_small, r_big])
+    # Subject
+    s_pick = Subject(name="Pick Subject", code="PICK101", department="PICK-DEPT",
+                     credits=3, periods_per_week=1, institution_id=inst.id)
+    db.add(s_pick)
+    db.flush()
+    # Assignment
+    a_pick = Assignment(faculty_id=scheduler_data["faculty"][0].id, 
+                        subject_id=s_pick.id, 
+                        batch_id=b_pick.id,
+                        semester=1, institution_id=inst.id)
+    db.add(a_pick)
+    db.commit()
+
+    # Batch has 60 students, should pick BIG (60 fits in 80, not 30)
+    result = generate_timetable(db, semester=1, department="PICK-DEPT", institution_id=inst.id)
+    assert result["timetable_id"] is not None
+    
+    slots = db.query(TimetableSlot).filter(
+        TimetableSlot.timetable_id == result["timetable_id"], 
+        TimetableSlot.slot_type == "class"
+    ).all()
+    assert len(slots) > 0
+    for s in slots:
+        room = db.get(Room, s.room_id)
+        assert room.room_number == "BIG"
+
+
+def test_weekly_workload_exceeded(db, scheduler_data):
+    """If a faculty member's total periods per week exceed the cap, generation should abort."""
+    inst = scheduler_data["institution"]
+    # Alice already has 3 periods (from DS). Add a subject with 20 periods to exceed the cap of 18.
+    s_heavy = Subject(name="Heavy Subject", code="HVY101", department="CSE",
+                      credits=10, periods_per_week=20, institution_id=inst.id)
+    db.add(s_heavy)
+    db.flush()
+    
+    # New batch and assignment for heavy subject
+    b_heavy = Batch(name="HEAVY-BATCH", department="HEAVY-CSE", semester=3,
+                    student_count=20, year=2024, institution_id=inst.id)
+    db.add(b_heavy)
+    db.flush()
+    a_heavy = Assignment(faculty_id=scheduler_data["faculty"][0].id, # Alice
+                         subject_id=s_heavy.id, 
+                         batch_id=b_heavy.id,
+                         semester=3, institution_id=inst.id)
+    db.add(a_heavy)
+    db.commit()
+
+    result = generate_timetable(db, semester=3, department="CSE", institution_id=inst.id)
+    assert result["timetable_id"] is None
+    assert any("exceeds weekly workload cap" in c for c in result["conflicts"])
+    assert any("assigned 23" in c for c in result["conflicts"]) # 3 from DS + 20 from heavy

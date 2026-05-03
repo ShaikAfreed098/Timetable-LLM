@@ -39,22 +39,11 @@ export default function Chat({ onTimetableGenerated }: ChatProps) {
     addMessage({ role: "assistant", content: "" });
 
     try {
-      // Use fetch for SSE streaming
-      const raw = localStorage.getItem("timetable-auth");
-      let token = "";
-      if (raw) {
-        try {
-          token = JSON.parse(raw)?.state?.token ?? "";
-        } catch {
-          // ignore
-        }
-      }
-
       const response = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           session_id: sessionId,

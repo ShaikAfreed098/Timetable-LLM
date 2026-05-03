@@ -8,6 +8,7 @@ class UserCreate(BaseModel):
     password: str
     role: str = "department_admin"
     department: Optional[str] = None
+    institution_id: Optional[int] = None
 
 
 class UserOut(BaseModel):

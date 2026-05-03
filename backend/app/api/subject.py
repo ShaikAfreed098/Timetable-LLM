@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models.subject import Subject
 from app.models.user import User
 from app.schemas.subject import SubjectCreate, SubjectUpdate, SubjectOut
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_role, require_department_scope
 
 router = APIRouter(prefix="/api/subjects", tags=["subjects"])
 
@@ -20,8 +20,9 @@ def list_subjects(db: Session = Depends(get_db), current_user: User = Depends(ge
 def add_subject(
     subject_in: SubjectCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
 ):
+    require_department_scope(current_user, subject_in.department)
     if db.query(Subject).filter(Subject.code == subject_in.code, Subject.institution_id == current_user.institution_id).first():
         raise HTTPException(status_code=400, detail="Subject code already exists.")
     subject = Subject(**subject_in.model_dump(), institution_id=current_user.institution_id)
@@ -46,11 +47,12 @@ def update_subject(
     subject_id: int,
     subject_in: SubjectUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
 ):
     subject = db.query(Subject).filter(Subject.id == subject_id, Subject.institution_id == current_user.institution_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found.")
+    require_department_scope(current_user, subject.department)
     for key, value in subject_in.model_dump(exclude_unset=True).items():
         setattr(subject, key, value)
     db.commit()
@@ -60,10 +62,11 @@ def update_subject(
 
 @router.delete("/{subject_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_subject(
-    subject_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    subject_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role("super_admin", "department_admin"))
 ):
     subject = db.query(Subject).filter(Subject.id == subject_id, Subject.institution_id == current_user.institution_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found.")
+    require_department_scope(current_user, subject.department)
     db.delete(subject)
     db.commit()

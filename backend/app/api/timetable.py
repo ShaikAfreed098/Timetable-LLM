@@ -6,10 +6,11 @@ from typing import List
 from app.database import get_db
 from app.models.timetable import TimetableSlot, Assignment
 from app.models.user import User
-from app.schemas.timetable import AssignmentCreate, AssignmentOut, TimetableSlotOut
-from app.core.auth import get_current_user
-from app.core.scheduler import generate_timetable as _generate, check_conflicts as _check
+from app.schemas.timetable import AssignmentCreate, AssignmentOut, TimetableSlotOut, GenerateRequest, TaskStatusOut
+from app.core.auth import get_current_user, require_role
+from app.core.scheduler import check_conflicts as _check
 from app.core.export import export_to_pdf, export_to_excel
+from app.tasks import generate_timetable_async
 
 router = APIRouter(prefix="/api/timetable", tags=["timetable"])
 
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/timetable", tags=["timetable"])
 def create_assignment(
     assignment_in: AssignmentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
 ):
     existing = (
         db.query(Assignment)
@@ -44,20 +45,45 @@ def list_assignments(db: Session = Depends(get_db), current_user: User = Depends
     return db.query(Assignment).filter(Assignment.institution_id == current_user.institution_id).all()
 
 
-@router.post("/generate")
-def generate(
-    semester: int,
-    department: str,
-    db: Session = Depends(get_db),
+@router.post("/generate", status_code=status.HTTP_202_ACCEPTED)
+def generate_async(
+    req: GenerateRequest,
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
+):
+    """
+    Enqueue an asynchronous timetable generation task.
+    """
+    task = generate_timetable_async.delay(
+        semester=req.semester,
+        department=req.department,
+        institution_id=current_user.institution_id,
+        user_id=current_user.id
+    )
+    return {"task_id": task.id, "state": "PENDING"}
+
+
+@router.get("/task/{task_id}", response_model=TaskStatusOut)
+def get_task_status(
+    task_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    try:
-        result = _generate(db, semester, department, current_user.institution_id)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=[str(e)])
-    if result.get("conflicts") and not result.get("timetable_id"):
-        raise HTTPException(status_code=422, detail=result["conflicts"])
-    return result
+    """
+    Poll the status of a generation task.
+    """
+    from celery.result import AsyncResult
+    from app.celery_app import celery_app
+    
+    res = AsyncResult(task_id, app=celery_app)
+    response = {"task_id": task_id, "state": res.state}
+    
+    if res.state == "SUCCESS":
+        response["result"] = res.result
+    elif res.state == "FAILURE":
+        response["error"] = str(res.info)
+    elif res.info and isinstance(res.info, dict):
+        response["status"] = res.info.get("status")
+        
+    return response
 
 
 @router.get("/{timetable_id}", response_model=List[TimetableSlotOut])
@@ -83,7 +109,7 @@ def modify_slot(
     new_faculty_id: int | None = None,
     new_room_id: int | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
 ):
     slot = (
         db.query(TimetableSlot)

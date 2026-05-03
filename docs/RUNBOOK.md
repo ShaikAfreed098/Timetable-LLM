@@ -20,6 +20,16 @@ docker compose -f docker-compose.prod.yml
 
 ## 2. Routine operations
 
+### First-run setup
+To bootstrap the application with the first institution and a super admin user, run:
+```bash
+docker compose exec backend python -m app.cli bootstrap \
+  --institution-name "My College" \
+  --slug "my-college" \
+  --admin-email "admin@example.com" \
+  --admin-password "change-me-later"
+```
+
 ### Restart a service
 ```bash
 cd /opt/timetable-llm

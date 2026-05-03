@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Dict
 
 from app.database import get_db
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_role
 from app.models.user import User
 from app.models.config import ScheduleConfig
 
@@ -38,7 +38,7 @@ def get_schedule_config(
 def update_schedule_config(
     payload: ScheduleConfigBase,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("super_admin", "department_admin"))
 ):
     config = db.query(ScheduleConfig).filter(ScheduleConfig.institution_id == current_user.institution_id).first()
     if not config:

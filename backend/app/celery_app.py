@@ -21,6 +21,12 @@ celery_app.conf.update(
     task_track_started=True,
     task_time_limit=300,  # 5 minute hard limit
     task_soft_time_limit=240,  # 4 minute soft limit
+    beat_schedule={
+        "cleanup-audit-logs-daily": {
+            "task": "app.tasks.cleanup_audit_logs",
+            "schedule": 86400.0,  # Every 24 hours
+        },
+    },
 )
 
 # Auto-discover tasks in app.tasks module

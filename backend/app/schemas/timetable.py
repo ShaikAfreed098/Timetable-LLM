@@ -48,3 +48,16 @@ class TimetableOut(BaseModel):
     batch: BatchOut
     slots: List[TimetableSlotOut]
     conflicts: List[str] = []
+
+
+class GenerateRequest(BaseModel):
+    semester: int
+    department: str
+
+
+class TaskStatusOut(BaseModel):
+    task_id: str
+    state: str
+    status: Optional[str] = None
+    result: Optional[dict] = None
+    error: Optional[str] = None

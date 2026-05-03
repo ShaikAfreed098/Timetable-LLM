@@ -8,11 +8,17 @@ class Settings(BaseSettings):
     APP_NAME: str = "Timetable LLM"
     DEBUG: bool = False
     ENVIRONMENT: str = "development"  # development | staging | production
+    AUDIT_LOG_RETENTION_DAYS: int = 365
+    SENTRY_DSN: Optional[str] = None
+    MAX_FACULTY_PERIODS_PER_WEEK: int = 18
 
     # JWT
     JWT_SECRET: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 24
+
+    # Bootstrap
+    BOOTSTRAP_TOKEN: Optional[str] = None
 
     # Firebase
     FIREBASE_PROJECT_ID: str = "timetable-lm"
@@ -30,7 +36,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # LLM — explicit provider selection, no key-prefix sniffing
-    LLM_PROVIDER: str = "openai"  # openai | nvidia | anthropic
+    LLM_PROVIDER: str = "openai"  # openai | nvidia | anthropic | openrouter
     LLM_API_KEY: Optional[str] = None
     LLM_BASE_URL: Optional[str] = None
     LLM_MODEL: str = "gpt-4o"

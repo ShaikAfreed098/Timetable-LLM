@@ -17,6 +17,7 @@ from app.models.subject import Subject
 from app.models.room import Room
 from app.models.batch import Batch
 from app.models.timetable import Assignment
+from app.models.audit import AuditLog
 
 
 @pytest.fixture()
@@ -206,3 +207,25 @@ def test_institution_export_is_scoped(client, db, two_institutions):
     disp = resp.headers.get("content-disposition", "")
     assert "inst-alpha" in disp
     assert "inst-beta" not in disp
+
+
+def test_audit_log_isolation(client, db, two_institutions):
+    alpha = two_institutions["inst-alpha"]
+    beta = two_institutions["inst-beta"]
+    
+    # Create audit logs for each
+    db.add(AuditLog(institution_id=alpha["institution"].id, action="alpha-action", user_id=alpha["user"].id))
+    db.add(AuditLog(institution_id=beta["institution"].id, action="beta-action", user_id=beta["user"].id))
+    db.commit()
+    
+    # Alpha sees only alpha
+    alpha_resp = client.get("/api/audit", headers=alpha["headers"]).json()
+    actions = [item["action"] for item in alpha_resp["items"]]
+    assert "alpha-action" in actions
+    assert "beta-action" not in actions
+        
+    # Beta sees only beta
+    beta_resp = client.get("/api/audit", headers=beta["headers"]).json()
+    actions = [item["action"] for item in beta_resp["items"]]
+    assert "beta-action" in actions
+    assert "alpha-action" not in actions

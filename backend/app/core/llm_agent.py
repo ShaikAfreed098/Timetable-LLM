@@ -41,8 +41,6 @@ Guidelines:
 - Confirm destructive actions before proceeding.
 - Present timetables as formatted Markdown tables.
 - If you lack information to call a tool, ask the user for the missing details.
-- Call tools one at a time when adding multiple items sequentially (this endpoint
-  is configured with parallel_tool_calls=False for provider compatibility).
 """
 
 TOOLS_SCHEMA = [
@@ -366,8 +364,7 @@ def run_agent(
         openai_api_key=api_key,
         base_url=base_url,
     )
-    # Disable parallel tool calls to support models/endpoints that only allow one tool call at a time
-    llm_with_tools = llm.bind_tools(TOOLS_SCHEMA, parallel_tool_calls=False)
+    llm_with_tools = llm.bind_tools(TOOLS_SCHEMA)
 
     from app.core.scheduler import get_institution_config
     config = get_institution_config(db, institution_id)

@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.config import settings
 from app.database import engine
 import app.models  # register all models
+import sentry_sdk
 
 from app.api.auth import router as auth_router
 from app.api.invites import router as invites_router
@@ -23,6 +24,15 @@ from app.api.timetable import router as timetable_router
 from app.api.chat import router as chat_router
 from app.api.config import router as config_router
 from app.api.institution import router as institution_router
+from app.api.audit import router as audit_router
+
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.ENVIRONMENT,
+        traces_sample_rate=1.0 if settings.ENVIRONMENT != "production" else 0.1,
+        profiles_sample_rate=1.0 if settings.ENVIRONMENT != "production" else 0.1,
+    )
 
 logger = logging.getLogger("timetable")
 
@@ -92,6 +102,7 @@ app.include_router(timetable_router)
 app.include_router(chat_router)
 app.include_router(config_router)
 app.include_router(institution_router)
+app.include_router(audit_router)
 
 
 @app.get("/")

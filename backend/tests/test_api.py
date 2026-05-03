@@ -1,7 +1,7 @@
 """
 API endpoint integration tests.
 """
-import pytest
+from app.models.institution import Institution
 
 
 def test_health(client):
@@ -10,7 +10,8 @@ def test_health(client):
     assert resp.json()["status"] == "ok"
 
 
-def test_register_and_login(client):
+def test_register_and_login(client, db):
+    inst = db.query(Institution).filter_by(slug="test-default").first()
     # Register
     resp = client.post(
         "/api/auth/register",
@@ -19,7 +20,9 @@ def test_register_and_login(client):
             "email": "apiuser@example.com",
             "password": "secret123",
             "role": "department_admin",
+            "institution_id": inst.id,
         },
+        headers={"X-Bootstrap-Token": "test-token"}
     )
     assert resp.status_code == 201
     data = resp.json()
@@ -34,7 +37,8 @@ def test_register_and_login(client):
     assert "access_token" in resp.json()
 
 
-def test_register_duplicate_username(client, auth_headers):
+def test_register_duplicate_username(client, db, auth_headers):
+    inst = db.query(Institution).filter_by(slug="test-default").first()
     client.post(
         "/api/auth/register",
         json={
@@ -42,7 +46,9 @@ def test_register_duplicate_username(client, auth_headers):
             "email": "dup1@example.com",
             "password": "pw",
             "role": "faculty",
+            "institution_id": inst.id,
         },
+        headers={"X-Bootstrap-Token": "test-token"}
     )
     resp = client.post(
         "/api/auth/register",
@@ -51,7 +57,9 @@ def test_register_duplicate_username(client, auth_headers):
             "email": "dup2@example.com",
             "password": "pw",
             "role": "faculty",
+            "institution_id": inst.id,
         },
+        headers={"X-Bootstrap-Token": "test-token"}
     )
     assert resp.status_code == 400
 

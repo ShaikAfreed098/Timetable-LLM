@@ -8,6 +8,8 @@ import sys
 # ── Set env BEFORE any app module is imported ──────────────────────────────────
 # This must happen before pydantic-settings reads the .env file via Settings().
 os.environ["DATABASE_URL"] = "sqlite:///./test_timetable.db"
+os.environ["BOOTSTRAP_TOKEN"] = "test-token"
+os.environ["FIREBASE_PROJECT_ID"] = "test"
 
 # Force a fresh import of app modules so they use the patched env var
 for mod in list(sys.modules.keys()):
@@ -77,8 +79,9 @@ def client(db):
 
 
 @pytest.fixture()
-def auth_headers(client):
+def auth_headers(client, db):
     """Register + login as super_admin and return auth headers."""
+    inst = db.query(Institution).filter_by(slug="test-default").first()
     client.post(
         "/api/auth/register",
         json={
@@ -86,7 +89,9 @@ def auth_headers(client):
             "email": "testadmin@example.com",
             "password": "testpass123",
             "role": "super_admin",
+            "institution_id": inst.id,
         },
+        headers={"X-Bootstrap-Token": "test-token"}
     )
     resp = client.post(
         "/api/auth/token",

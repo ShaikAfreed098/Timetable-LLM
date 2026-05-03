@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models.faculty import Faculty
 from app.models.user import User
 from app.schemas.faculty import FacultyCreate, FacultyUpdate, FacultyOut
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_role, require_department_scope
 
 router = APIRouter(prefix="/api/faculty", tags=["faculty"])
 
@@ -20,8 +20,9 @@ def list_faculty(db: Session = Depends(get_db), current_user: User = Depends(get
 def add_faculty(
     faculty_in: FacultyCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
 ):
+    require_department_scope(current_user, faculty_in.department)
     if db.query(Faculty).filter(Faculty.email == faculty_in.email, Faculty.institution_id == current_user.institution_id).first():
         raise HTTPException(status_code=400, detail="Faculty email already exists.")
     faculty = Faculty(**faculty_in.model_dump(), institution_id=current_user.institution_id)
@@ -46,11 +47,12 @@ def update_faculty(
     faculty_id: int,
     faculty_in: FacultyUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
 ):
     faculty = db.query(Faculty).filter(Faculty.id == faculty_id, Faculty.institution_id == current_user.institution_id).first()
     if not faculty:
         raise HTTPException(status_code=404, detail="Faculty not found.")
+    require_department_scope(current_user, faculty.department)
     for key, value in faculty_in.model_dump(exclude_unset=True).items():
         setattr(faculty, key, value)
     db.commit()
@@ -60,11 +62,12 @@ def update_faculty(
 
 @router.delete("/{faculty_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_faculty(
-    faculty_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    faculty_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role("super_admin", "department_admin"))
 ):
     faculty = db.query(Faculty).filter(Faculty.id == faculty_id, Faculty.institution_id == current_user.institution_id).first()
     if not faculty:
         raise HTTPException(status_code=404, detail="Faculty not found.")
+    require_department_scope(current_user, faculty.department)
     db.delete(faculty)
     db.commit()
 

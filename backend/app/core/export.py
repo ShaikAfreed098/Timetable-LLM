@@ -112,7 +112,7 @@ def export_to_pdf(db: Session, timetable_id: str, institution_id: int) -> bytes:
         Paragraph,
         Spacer,
     )
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import cm
 
     slots: List[TimetableSlot] = (

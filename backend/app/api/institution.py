@@ -139,6 +139,7 @@ def export_institution(
         entity_id=str(iid),
         details={"exporter": current_user.email},
     )
+    db.commit()
 
     filename = f"timetable-llm-export-{inst.slug}-{datetime.utcnow().strftime('%Y%m%d')}.zip"
     return Response(
@@ -199,6 +200,7 @@ def delete_institution_data(
         details={"requested_by": current_user.email},
         ip_address=request.client.host if request.client else None,
     )
+    db.commit()
 
     # Retain audit log for compliance — do NOT delete AuditLog rows here.
     _ = db.query(AuditLog).filter(AuditLog.institution_id == iid).count()

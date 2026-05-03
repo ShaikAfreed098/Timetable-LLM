@@ -154,4 +154,36 @@ export const fetchScheduleConfig = () =>
 export const updateScheduleConfig = (data: ScheduleConfig) =>
   api.post<ScheduleConfig>("/api/config/schedule", data).then((r) => r.data);
 
+// ─── Invites ─────────────────────────────────────────────────────────────────
+
+export const fetchInvites = () =>
+  api.get<any[]>("/api/invites").then((r) => r.data);
+
+export const createInvite = (data: { email: string; role: string }) =>
+  api.post<any>("/api/invites", data).then((r) => r.data);
+
+// ─── Audit Logs ─────────────────────────────────────────────────────────────
+
+export interface AuditLog {
+  id: number;
+  created_at: string;
+  user_id: number | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  details: any;
+  ip_address: string | null;
+}
+
+export const fetchAuditLogs = (limit = 50, offset = 0) =>
+  api.get<{ total: number; items: AuditLog[] }>(`/api/audit?limit=${limit}&offset=${offset}`).then((r) => r.data);
+
+// ─── Institution ─────────────────────────────────────────────────────────────
+
+export const deleteInstitutionData = () =>
+  api.delete("/api/institution/data");
+
+export const exportInstitutionData = () =>
+  api.get("/api/institution/export", { responseType: 'blob' }).then(r => r.data);
+
 export default api;

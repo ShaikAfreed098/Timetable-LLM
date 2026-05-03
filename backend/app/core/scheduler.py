@@ -20,6 +20,7 @@ from app.models.room import Room, RoomType
 from app.models.timetable import Assignment, TimetableSlot
 
 from app.models.config import ScheduleConfig
+from app.config import settings
 
 def get_institution_config(db: Session, institution_id: int):
     config = db.query(ScheduleConfig).filter(ScheduleConfig.institution_id == institution_id).first()
@@ -58,11 +59,14 @@ def generate_timetable(db: Session, semester: int, department: str, institution_
         .all()
     )
 
-    faculty_list: List[Faculty] = db.query(Faculty).filter(Faculty.is_active == True, Faculty.institution_id == institution_id).all()
+    faculty_list: List[Faculty] = db.query(Faculty).filter(Faculty.is_active, Faculty.institution_id == institution_id).all()
     rooms: List[Room] = db.query(Room).filter(Room.institution_id == institution_id).all()
 
     classrooms = [r for r in rooms if r.type != RoomType.lab]
     labs = [r for r in rooms if r.type == RoomType.lab]
+
+    # Batch ID map for lookup
+    batch_map = {b.id: b for b in batches}
 
     # Index helpers
     batch_ids = [b.id for b in batches]
@@ -88,6 +92,57 @@ def generate_timetable(db: Session, semester: int, department: str, institution_
                     "requires_lab": subj.requires_lab,
                 }
             )
+
+    # Pre-check for room capacity
+    capacity_conflicts = []
+    checked = set()
+    for s in slots_needed:
+        b_id = s["batch_id"]
+        req_lab = s["requires_lab"]
+        if (b_id, req_lab) in checked:
+            continue
+        checked.add((b_id, req_lab))
+
+        batch = batch_map[b_id]
+        target_rooms = labs if req_lab else classrooms
+        eligible = [r for r in target_rooms if r.capacity >= batch.student_count]
+        if not eligible:
+            room_type = "lab" if req_lab else "classroom"
+            max_cap = max([r.capacity for r in target_rooms]) if target_rooms else 0
+            capacity_conflicts.append(
+                f"Batch '{batch.name}' (size={batch.student_count}) has no suitable "
+                f"{room_type}: largest available capacity is {max_cap}"
+            )
+
+    if capacity_conflicts:
+        return {
+            "timetable_id": None,
+            "slots": [],
+            "conflicts": sorted(capacity_conflicts)
+        }
+
+    # Pre-check for faculty weekly workload
+    workload_conflicts = []
+    for fac in faculty_list:
+        # Sum periods for all subjects assigned to this faculty in this semester
+        fac_assignments = [a for a in assignments if a.faculty_id == fac.id and a.semester == semester]
+        total_periods = 0
+        for a in fac_assignments:
+            subj: Subject = db.get(Subject, a.subject_id)
+            if subj:
+                total_periods += subj.periods_per_week
+        
+        if total_periods > settings.MAX_FACULTY_PERIODS_PER_WEEK:
+            workload_conflicts.append(
+                f"Faculty '{fac.name}' exceeds weekly workload cap: assigned {total_periods}, cap {settings.MAX_FACULTY_PERIODS_PER_WEEK}"
+            )
+            
+    if workload_conflicts:
+        return {
+            "timetable_id": None,
+            "slots": [],
+            "conflicts": sorted(workload_conflicts)
+        }
 
     if not slots_needed:
         return {
@@ -156,7 +211,8 @@ def generate_timetable(db: Session, semester: int, department: str, institution_
                                 model.AddBoolOr([b1_has.Not(), b2_has.Not()]).OnlyEnforceIf(both.Not())
                                 model.Add(both == 0)
 
-    # --- 3. Faculty unavailable slots ---
+    # --- 3. Faculty constraints ---
+    # 3.1 Unavailable slots
     for s_idx, s in enumerate(slots_needed):
         fac = faculty_map.get(s["faculty_id"])
         if not fac:
@@ -170,6 +226,34 @@ def generate_timetable(db: Session, semester: int, department: str, institution_
             p_idx = TEACHING_PERIODS.index(period_num)
             b_id = s["batch_id"]
             model.Add(cell[b_id, d_idx, p_idx] != s_idx)
+
+    # 3.2 Max periods per day cap
+    for fac_id, fac in faculty_map.items():
+        max_daily = fac.max_periods_per_day or 5
+        fac_slot_indices = [idx for idx, s in enumerate(slots_needed) if s["faculty_id"] == fac_id]
+        if not fac_slot_indices:
+            continue
+
+        for d_idx in range(len(DAYS)):
+            day_indicators = []
+            for p_idx in range(len(TEACHING_PERIODS)):
+                # Is faculty busy at this (day, period)?
+                # They are busy if ANY batch's cell at (d, p) points to one of their slots.
+                is_busy = model.NewBoolVar(f"fac_{fac_id}_d{d_idx}_p{p_idx}")
+                
+                cell_matches = []
+                for b_id in batch_ids:
+                    for s_idx in fac_slot_indices:
+                        match = model.NewBoolVar(f"fac_{fac_id}_match_b{b_id}_d{d_idx}_p{p_idx}_s{s_idx}")
+                        model.Add(cell[b_id, d_idx, p_idx] == s_idx).OnlyEnforceIf(match)
+                        model.Add(cell[b_id, d_idx, p_idx] != s_idx).OnlyEnforceIf(match.Not())
+                        cell_matches.append(match)
+                
+                model.AddBoolOr(cell_matches).OnlyEnforceIf(is_busy)
+                model.AddBoolAnd([m.Not() for m in cell_matches]).OnlyEnforceIf(is_busy.Not())
+                day_indicators.append(is_busy)
+            
+            model.Add(sum(day_indicators) <= max_daily)
 
     # --- 4. Soft constraint: avoid same subject on same day ---
     penalty_vars = []
@@ -244,7 +328,19 @@ def generate_timetable(db: Session, semester: int, department: str, institution_
                     )
                 else:
                     s = slots_needed[val]
-                    chosen_room_id = lab_ids[0] if s["requires_lab"] else classroom_ids[0]
+                    batch = batch_map[s["batch_id"]]
+                    room_list = labs if s["requires_lab"] else classrooms
+                    eligible = [r for r in room_list if r.capacity >= batch.student_count]
+                    
+                    if eligible:
+                        chosen_room_id = eligible[0].id
+                    else:
+                        # Fallback to largest as safety measure
+                        if room_list:
+                            chosen_room_id = max(room_list, key=lambda r: r.capacity).id
+                        else:
+                            chosen_room_id = lab_ids[0] if s["requires_lab"] else classroom_ids[0]
+
                     slot = TimetableSlot(
                         timetable_id=timetable_id,
                         institution_id=institution_id,

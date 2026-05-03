@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Chat from "@/components/Chat";
 import TimetableGrid from "@/components/TimetableGrid";
 import LoginForm from "@/components/LoginForm";
+import Link from "next/link";
 import { useAuthStore } from "@/store/auth";
 import {
   Faculty, Subject, Room, Batch, Assignment,
@@ -12,20 +13,24 @@ import {
   fetchRooms, createRoom, deleteRoom,
   fetchBatches, createBatch, deleteBatch,
   fetchAssignments, createAssignment, deleteAssignment,
-  ScheduleConfig, fetchScheduleConfig, updateScheduleConfig
+  ScheduleConfig, fetchScheduleConfig, updateScheduleConfig,
+  fetchInvites, createInvite
 } from "@/lib/api";
 
-type Section = "chat" | "timetable" | "faculty" | "subjects" | "rooms" | "batches" | "assignments" | "settings";
+type Section = "chat" | "timetable" | "faculty" | "subjects" | "rooms" | "batches" | "assignments" | "settings" | "invites" | "config" | "audit";
 
-const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
+const NAV_ITEMS: { id: Section; label: string; icon: string; adminOnly?: boolean; href?: string }[] = [
   { id: "chat",        label: "AI Chat",     icon: "💬" },
   { id: "timetable",  label: "Timetable",   icon: "📅" },
-  { id: "faculty",    label: "Faculty",     icon: "👩‍🏫" },
-  { id: "subjects",   label: "Subjects",    icon: "📚" },
-  { id: "rooms",      label: "Rooms",       icon: "🏫" },
-  { id: "batches",    label: "Batches",     icon: "👥" },
-  { id: "assignments",label: "Assignments", icon: "🔗" },
-  { id: "settings",   label: "Settings",    icon: "⚙️" },
+  { id: "faculty",    label: "Faculty",     icon: "👩‍🏫", adminOnly: true },
+  { id: "subjects",   label: "Subjects",    icon: "📚", adminOnly: true },
+  { id: "rooms",      label: "Rooms",       icon: "🏫", adminOnly: true },
+  { id: "batches",    label: "Batches",     icon: "👥", adminOnly: true },
+  { id: "assignments",label: "Assignments", icon: "🔗", adminOnly: true },
+  { id: "config",     label: "Schedule Config", icon: "⚙️", adminOnly: true, href: "/admin/schedule-config" },
+  { id: "settings",   label: "Settings",    icon: "🛠️", adminOnly: true, href: "/admin/settings" },
+  { id: "invites",    label: "Invites",     icon: "📧", adminOnly: true, href: "/admin/invites" },
+  { id: "audit",      label: "Audit Logs",  icon: "🛡️", adminOnly: true, href: "/admin/audit-logs" },
 ];
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
@@ -726,6 +731,93 @@ function SettingsSection() {
   );
 }
 
+// ─── Admin Invites Section ───────────────────────────────────────────────────
+
+function AdminInvitesSection() {
+  const [invites, setInvites] = useState<any[]>([]);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("department_admin");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setInvites(await fetchInvites()); } catch { setError("Failed to load invites."); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault(); setError("");
+    try {
+      await createInvite({ email, role });
+      setEmail("");
+      load();
+    } catch { setError("Failed to create invite."); }
+  };
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-800">Manage Invitations</h1>
+        <p className="text-gray-500">Invite new administrators or faculty members to the system.</p>
+      </div>
+
+      <form onSubmit={handleCreate} className="bg-white p-6 rounded-xl shadow mb-8 flex flex-col sm:flex-row gap-4 items-end">
+        <div className="flex-1 w-full">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="colleague@institution.edu" />
+        </div>
+        <div className="w-full sm:w-48">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+          <select value={role} onChange={e => setRole(e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+            <option value="department_admin">Department Admin</option>
+            <option value="faculty">Faculty</option>
+          </select>
+        </div>
+        <button type="submit" className="w-full sm:w-auto bg-primary text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">
+          Send Invite
+        </button>
+      </form>
+
+      {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
+
+      {loading ? <Spinner /> : invites.length === 0 ? (
+        <EmptyState icon="📧" title="No invites yet" sub="Send an invite to get started." />
+      ) : (
+        <div className="bg-white rounded-xl shadow overflow-hidden">
+          <table className="w-full text-sm">
+            <TableHeader cols={["Email", "Role", "Status", "Sent", "Actions"]} />
+            <tbody className="divide-y divide-gray-100">
+              {invites.map((inv, i) => (
+                <tr key={inv.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                  <td className="px-4 py-3 font-medium text-gray-800">{inv.email}</td>
+                  <td className="px-4 py-3 capitalize text-gray-600">{inv.role.replace("_", " ")}</td>
+                  <td className="px-4 py-3">
+                    {inv.used_at ? (
+                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">Accepted</span>
+                    ) : new Date(inv.expires_at) < new Date() ? (
+                      <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">Expired</span>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">Pending</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">{new Date(inv.created_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-3">—</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main App Layout ──────────────────────────────────────────────────────────
 
 export default function HomePage() {
@@ -742,16 +834,20 @@ export default function HomePage() {
     );
   }
 
+  const isAdmin = role === "super_admin" || role === "department_admin";
+
   const renderSection = () => {
     switch (section) {
       case "chat":        return <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
       case "timetable":  return <TimetableGrid timetableId={timetableId} />;
-      case "faculty":    return <FacultySection />;
-      case "subjects":   return <SubjectsSection />;
-      case "rooms":      return <RoomsSection />;
-      case "batches":    return <BatchesSection />;
-      case "assignments":return <AssignmentsSection />;
-      case "settings":   return <SettingsSection />;
+      case "faculty":    return isAdmin ? <FacultySection /> : <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
+      case "subjects":   return isAdmin ? <SubjectsSection /> : <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
+      case "rooms":      return isAdmin ? <RoomsSection /> : <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
+      case "batches":    return isAdmin ? <BatchesSection /> : <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
+      case "assignments":return isAdmin ? <AssignmentsSection /> : <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
+      case "settings":   return isAdmin ? <SettingsSection /> : <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
+      case "invites":    return isAdmin ? <AdminInvitesSection /> : <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
+      default: return <Chat onTimetableGenerated={(id) => { setTimetableId(id); setSection("timetable"); }} />;
     }
   };
 
@@ -787,17 +883,25 @@ export default function HomePage() {
         {/* Sidebar */}
         <aside className={`${sidebarOpen ? "w-52" : "w-0"} flex-shrink-0 bg-white border-r transition-all duration-300 overflow-hidden`}>
           <nav className="py-4 space-y-1 px-2">
-            {NAV_ITEMS.map(item => (
-              <button key={item.id} onClick={() => setSection(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  section === item.id ? "bg-primary text-white shadow-sm" : "text-gray-600 hover:bg-gray-100"
-                }`}>
-                <span className="text-lg leading-none">{item.icon}</span>
-                <span>{item.label}</span>
-                {item.id === "assignments" && (
-                  <span className="ml-auto text-xs opacity-60">→ Schedule</span>
-                )}
-              </button>
+            {NAV_ITEMS.filter(item => !item.adminOnly || isAdmin).map(item => (
+              item.href ? (
+                <Link key={item.id} href={item.href}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-gray-600 hover:bg-gray-100">
+                  <span className="text-lg leading-none">{item.icon}</span>
+                  <span>{item.label}</span>
+                </Link>
+              ) : (
+                <button key={item.id} onClick={() => setSection(item.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    section === item.id ? "bg-primary text-white shadow-sm" : "text-gray-600 hover:bg-gray-100"
+                  }`}>
+                  <span className="text-lg leading-none">{item.icon}</span>
+                  <span>{item.label}</span>
+                  {item.id === "assignments" && (
+                    <span className="ml-auto text-xs opacity-60">→ Schedule</span>
+                  )}
+                </button>
+              )
             ))}
           </nav>
 

@@ -1,7 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
-from datetime import datetime
 
 class Invite(Base):
     __tablename__ = "invites"
@@ -11,6 +10,7 @@ class Invite(Base):
     email = Column(String, nullable=False, index=True)
     role = Column(String, nullable=False)
     token = Column(String, unique=True, nullable=False, index=True)
+    purpose = Column(String, default="invite", nullable=False)
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
 

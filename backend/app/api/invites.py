@@ -7,8 +7,10 @@ from app.database import get_db
 from app.models.user import User
 from app.models.invite import Invite
 from app.schemas.invite import InviteCreate, InviteOut, InviteAccept
-from app.core.auth import get_current_user, require_role
+from app.core.auth import require_role
 from passlib.context import CryptContext
+from app.config import settings
+from app.tasks import send_email
 
 router = APIRouter(prefix="/api/invites", tags=["invites"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -43,12 +45,19 @@ def create_invite(
     db.commit()
     db.refresh(invite)
     
-    # TODO: Send email with token here. (Phase 7)
+    # Send email with token
+    invite_url = f"{settings.ALLOWED_ORIGINS.split(',')[0]}/accept-invite?token={token}"
+    send_email.delay(
+        to_email=invite.email,
+        subject=f"Invitation to join {current_user.institution.name}",
+        body=f"You have been invited to join {current_user.institution.name} as a {invite.role}.\n\nClick here to accept: {invite_url}"
+    )
+    
     return invite
 
 @router.post("/{token}/accept", status_code=status.HTTP_200_OK)
 def accept_invite(token: str, accept_in: InviteAccept, db: Session = Depends(get_db)):
-    invite = db.query(Invite).filter(Invite.token == token, Invite.used_at.is_(None)).first()
+    invite = db.query(Invite).filter(Invite.token == token, Invite.purpose == "invite", Invite.used_at.is_(None)).first()
     
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found or already used")

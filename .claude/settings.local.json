@@ -6,7 +6,8 @@
       "Bash(taskkill /F /IM uvicorn.exe /T)",
       "Bash(python -m pytest tests/ -v)",
       "Bash(python -m pytest tests/test_tenant_isolation.py::test_list_endpoints_are_tenant_scoped -v)",
-      "Bash(python -m pytest tests/test_tenant_isolation.py -v)"
+      "Bash(python -m pytest tests/test_tenant_isolation.py -v)",
+      "Bash(python -c \"from app.database import SessionLocal; from app.models.user import User; from app.models.institution import Institution; db = SessionLocal\\(\\); insts = db.query\\(Institution\\).all\\(\\); users = db.query\\(User\\).all\\(\\); print\\('INSTITUTIONS:', [\\(i.id, i.name, i.slug\\) for i in insts]\\); print\\('USERS:', [\\(u.id, u.username, u.email, u.role, u.institution_id, 'firebase' if u.hashed_password == 'firebase-managed' else 'local-pw'\\) for u in users]\\)\")"
     ]
   }
 }

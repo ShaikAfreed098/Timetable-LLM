@@ -26,4 +26,4 @@ def log_action(
         ip_address=ip_address,
     )
     db.add(entry)
-    db.commit()
+    db.flush()

@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models.room import Room
 from app.models.user import User
 from app.schemas.room import RoomCreate, RoomUpdate, RoomOut
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_role
 
 router = APIRouter(prefix="/api/rooms", tags=["rooms"])
 
@@ -20,7 +20,7 @@ def list_rooms(db: Session = Depends(get_db), current_user: User = Depends(get_c
 def add_room(
     room_in: RoomCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
 ):
     if db.query(Room).filter(Room.room_number == room_in.room_number, Room.institution_id == current_user.institution_id).first():
         raise HTTPException(status_code=400, detail="Room number already exists.")
@@ -44,7 +44,7 @@ def update_room(
     room_id: int,
     room_in: RoomUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("super_admin", "department_admin")),
 ):
     room = db.query(Room).filter(Room.id == room_id, Room.institution_id == current_user.institution_id).first()
     if not room:
@@ -58,7 +58,7 @@ def update_room(
 
 @router.delete("/{room_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_room(
-    room_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    room_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role("super_admin", "department_admin"))
 ):
     room = db.query(Room).filter(Room.id == room_id, Room.institution_id == current_user.institution_id).first()
     if not room:
